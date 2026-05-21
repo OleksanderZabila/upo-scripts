@@ -36,7 +36,10 @@ ENTRY_BG = '#0E1724'
 SUCCESS  = '#3C9E52'
 WARN     = '#D89A00'
 ERR      = '#C83030'
-ALT_ROW  = 'B8C8E0'   # darker alternating row colour
+ALT_ROW  = 'B8C8E0'
+
+# stat header colours (match screenshot)
+S_COL = ['#CC7700', '#1A55AA', '#CC5500', '#1A55AA', '#1A55AA']
 
 ctk.set_appearance_mode('dark')
 
@@ -60,47 +63,63 @@ def td_serial(td):
 
 def get_car(unit, car_map):
     s = str(unit).strip()
-    # direct match
     if s in car_map:
         return car_map[s]
-    # case-insensitive fallback
-    sl = s.lower()
     for k, v in car_map.items():
-        if k.strip().lower() == sl:
+        if k.strip().lower() == s.lower():
             return v
     return ''
 
-# ── conversion ────────────────────────────────────────────────────────────────
 def read_df(path, sheet):
     try:
         return pd.read_excel(path, sheet_name=sheet, header=None)
     except Exception:
         return None
 
-def convert(src1, src2, car_map, colorize=False):
+def load_frames(paths):
     frames = []
-    for p in [src1, src2]:
+    for p in paths:
         if not p or not os.path.exists(p):
             continue
         for sh in [0, 1]:
             df = read_df(p, sh)
             if df is not None:
                 frames.append(df)
-
     if not frames:
-        raise ValueError('Не вдалось прочитати файли')
-
+        return None
     df = pd.concat(frames, ignore_index=True)
-    df = df.drop_duplicates(subset=[1, 2])          # унікальні за (час, назва)
-
+    df = df.drop_duplicates(subset=[1, 2])
     CUT = 6 * 3600
-    def skey(r):
+    def sk(r):
         s = r[1].total_seconds() if hasattr(r[1], 'total_seconds') else 0
         return s + 86400 if s < CUT else s
+    df['_s'] = df.apply(sk, axis=1)
+    return df.sort_values('_s').drop(columns='_s').reset_index(drop=True)
 
-    df['_s'] = df.apply(skey, axis=1)
-    df = df.sort_values('_s').drop(columns='_s').reset_index(drop=True)
+# ── statistics ────────────────────────────────────────────────────────────────
+def calc_stats(df):
+    if df is None or df.empty:
+        return None
+    durs = []
+    for _, row in df.iterrows():
+        b, g = row[1], row[6]
+        if hasattr(b, 'total_seconds') and hasattr(g, 'total_seconds'):
+            d = (g.total_seconds() - b.total_seconds()) / 60
+            if d >= 0:
+                durs.append(d)
+    if not durs:
+        return None
+    return {
+        'до_3':  sum(1 for x in durs if x <= 3),
+        '3_6':   sum(1 for x in durs if 3  < x <= 6),
+        '6_9':   sum(1 for x in durs if 6  < x <= 9),
+        '9_15':  sum(1 for x in durs if 9  < x <= 15),
+        '15p':   sum(1 for x in durs if x  > 15),
+        'total': len(durs),
+    }
 
+# ── conversion ────────────────────────────────────────────────────────────────
+def convert(df, car_map, colorize=False, src_path=''):
     wb = Workbook()
     ws = wb.active
     try:
@@ -108,28 +127,18 @@ def convert(src1, src2, car_map, colorize=False):
     except Exception:
         pass
 
-    # ── output: 8 колонок ─────────────────────────────────────────────────────
-    # 1: B (час дзвінка)         → H:MM:SS
-    # 2: C (назва)               → text
-    # 3: D (адреса)              → text
-    # 4: E (час дзвінка HH:MM)   → HH:MM:SS  (той самий серіал, інший формат)
-    # 5: F (наряд)               → text
-    # 6: G (час відбуття)        → H:MM:SS
-    # 7: ТРИВАЛІСТЬ = MINUTE(F6-D4)
-    # 8: Номер авто НР
-
     HDR = ['ТП', 'Назва', 'Адреса', 'Час прийому виклику',
            'Наряд', 'Час відбуття', 'Тривалість (хв)', 'Номер авто НР']
 
-    thin   = Side(style='thin', color='8899AA')
-    brd    = Border(left=thin, right=thin, top=thin, bottom=thin)
-    hdr_f  = Font(name='Arial', bold=True, size=10, color='FFFFFF')
-    hdr_fi = PatternFill('solid', fgColor='1B3865')
-    h_al   = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    thin  = Side(style='thin', color='8899AA')
+    brd   = Border(left=thin, right=thin, top=thin, bottom=thin)
+    hf    = Font(name='Arial', bold=True, size=10, color='FFFFFF')
+    hfil  = PatternFill('solid', fgColor='1B3865')
+    hal   = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
     for ci, h in enumerate(HDR, 1):
         c = ws.cell(1, ci, h)
-        c.font = hdr_f; c.fill = hdr_fi; c.alignment = h_al; c.border = brd
+        c.font = hf; c.fill = hfil; c.alignment = hal; c.border = brd
     ws.row_dimensions[1].height = 30
 
     rf   = Font(name='Arial', size=10)
@@ -138,10 +147,9 @@ def convert(src1, src2, car_map, colorize=False):
     afil = PatternFill('solid', fgColor=ALT_ROW)
 
     for ri, (_, row) in enumerate(df.iterrows(), 2):
-        call_s   = td_serial(row[1])
-        depart_s = td_serial(row[6])
-        unit     = row[5]
-        car_num  = get_car(unit, car_map)
+        cs  = td_serial(row[1])
+        ds  = td_serial(row[6])
+        car = get_car(row[5], car_map)
 
         def wr(col, val, fmt=None, al=cen):
             c = ws.cell(ri, col, val)
@@ -149,20 +157,21 @@ def convert(src1, src2, car_map, colorize=False):
             if fmt: c.number_format = fmt
             if colorize and ri % 2 == 0: c.fill = afil
 
-        wr(1, call_s,                    'H:MM:SS')
-        wr(2, row[2],                    al=left)
-        wr(3, row[3],                    al=left)
-        wr(4, call_s,                    'HH:MM:SS')
-        wr(5, unit)
-        wr(6, depart_s,                  'H:MM:SS')
+        wr(1, cs,                   'H:MM:SS')
+        wr(2, row[2],               al=left)
+        wr(3, row[3],               al=left)
+        wr(4, cs,                   'HH:MM:SS')
+        wr(5, row[5])
+        wr(6, ds,                   'H:MM:SS')
         wr(7, f'=MINUTE(F{ri}-D{ri})')
-        wr(8, car_num)
+        wr(8, car)
 
     for i, w in enumerate([10, 30, 34, 12, 12, 10, 12, 18], 1):
         ws.column_dimensions[get_column_letter(i)].width = w
     ws.freeze_panes = 'A2'
 
-    out_dir  = os.path.dirname(src1)
+    base     = src_path or BASE_DIR
+    out_dir  = os.path.dirname(base) if os.path.isfile(base) else base
     date_str = datetime.today().strftime('%d.%m.%Y')
     out      = os.path.join(out_dir, f'УПО_{date_str}.xlsx')
     n = 1
@@ -170,6 +179,109 @@ def convert(src1, src2, car_map, colorize=False):
         out = os.path.join(out_dir, f'УПО_{date_str}_{n}.xlsx'); n += 1
     wb.save(out)
     return out, len(df)
+
+# ── stats panel ───────────────────────────────────────────────────────────────
+STAT_LABELS = ['До 3 хв', 'Від 3.01\nдо 6 хв', 'Від 6.01\nдо 9 хв',
+               'Від 9.01\nдо 15 хв', 'Більше\n15 хв']
+STAT_KEYS   = ['до_3', '3_6', '6_9', '9_15', '15p']
+
+class StatsPanel(tk.Frame):
+    def __init__(self, parent, **kw):
+        super().__init__(parent, bg=BG, **kw)
+        self._val_labels = []
+        self._total_lbl  = None
+        self._build()
+
+    def _build(self):
+        COL_W = 118
+
+        # header row
+        for ci, (txt, col) in enumerate(zip(STAT_LABELS, S_COL)):
+            f = tk.Frame(self, bg=col, width=COL_W, height=44)
+            f.grid(row=0, column=ci, padx=1, pady=(0, 1), sticky='nsew')
+            f.pack_propagate(False)
+            tk.Label(f, text=txt, bg=col, fg=WHITE,
+                     font=('Arial', 9, 'bold'), justify='center').pack(expand=True)
+
+        # value row
+        for ci in range(5):
+            f = tk.Frame(self, bg=WHITE, width=COL_W, height=36)
+            f.grid(row=1, column=ci, padx=1, pady=1, sticky='nsew')
+            f.pack_propagate(False)
+            lbl = tk.Label(f, text='—', bg=WHITE, fg='#1A1A2E',
+                           font=('Arial', 14, 'bold'))
+            lbl.pack(expand=True)
+            self._val_labels.append(lbl)
+
+        # total row — spans last 2 cells to match screenshot
+        f_lbl = tk.Frame(self, bg=WHITE, width=COL_W, height=28)
+        f_lbl.grid(row=2, column=3, padx=1, pady=1, sticky='nsew')
+        f_lbl.pack_propagate(False)
+        tk.Label(f_lbl, text='Всього', bg=WHITE, fg='#1A1A2E',
+                 font=('Arial', 10, 'bold')).pack(expand=True)
+
+        f_tot = tk.Frame(self, bg=WHITE, width=COL_W, height=28)
+        f_tot.grid(row=2, column=4, padx=1, pady=1, sticky='nsew')
+        f_tot.pack_propagate(False)
+        self._total_lbl = tk.Label(f_tot, text='—', bg=WHITE, fg='#1A1A2E',
+                                    font=('Arial', 13, 'bold'))
+        self._total_lbl.pack(expand=True)
+
+    def update(self, stats):
+        if stats is None:
+            for lbl in self._val_labels:
+                lbl.configure(text='—')
+            self._total_lbl.configure(text='—')
+            return
+        for lbl, key in zip(self._val_labels, STAT_KEYS):
+            lbl.configure(text=str(stats[key]))
+        self._total_lbl.configure(text=str(stats['total']))
+
+# ── file row widget ───────────────────────────────────────────────────────────
+class FileRow(ctk.CTkFrame):
+    def __init__(self, parent, label, on_change=None, **kw):
+        super().__init__(parent, fg_color='transparent', **kw)
+        self.var      = tk.StringVar()
+        self.enabled  = tk.BooleanVar(value=True)
+        self.on_change = on_change
+
+        ctk.CTkCheckBox(self, text='', variable=self.enabled, width=28,
+                        fg_color=BTN, hover_color=BTN_HOV,
+                        border_color=BORDER, checkmark_color=WHITE,
+                        command=self._changed).pack(side='left')
+
+        ctk.CTkLabel(self, text=label, width=58, anchor='w',
+                     font=('Arial', 11), text_color=MUTED,
+                     fg_color='transparent').pack(side='left')
+
+        ctk.CTkEntry(self, textvariable=self.var, width=352, height=30,
+                     fg_color=ENTRY_BG, border_color=BORDER,
+                     text_color=WHITE, font=('Arial', 11),
+                     placeholder_text='Оберіть .xlsx файл...'
+                     ).pack(side='left', padx=(0, 5))
+
+        ctk.CTkButton(self, text='📂', width=44, height=30,
+                      fg_color=BTN, hover_color=BTN_HOV,
+                      text_color=WHITE, font=('Arial', 12),
+                      corner_radius=6, command=self._pick
+                      ).pack(side='left')
+
+        self.var.trace_add('write', lambda *_: self._changed())
+
+    def _pick(self):
+        p = filedialog.askopenfilename(
+            title='Оберіть Excel файл',
+            filetypes=[('Excel', '*.xlsx *.xls'), ('Всі файли', '*.*')])
+        if p:
+            self.var.set(p)
+
+    def _changed(self):
+        if self.on_change:
+            self.on_change()
+
+    def get(self):
+        p = self.var.get().strip()
+        return p if (self.enabled.get() and p and os.path.exists(p)) else None
 
 # ── settings dialog ───────────────────────────────────────────────────────────
 class SettingsDialog(ctk.CTkToplevel):
@@ -204,7 +316,8 @@ class SettingsDialog(ctk.CTkToplevel):
                              border_color=BORDER, text_color=WHITE,
                              font=('Arial', 12), placeholder_text='держномер...')
             val = cfg.get('car_numbers', {}).get(u, '')
-            if val: e.insert(0, val)
+            if val:
+                e.insert(0, val)
             e.pack(side='left', padx=(8, 0))
             self.entries[u] = e
 
@@ -220,39 +333,12 @@ class SettingsDialog(ctk.CTkToplevel):
         self.on_save(self.cfg['car_numbers'])
         self.destroy()
 
-# ── file row widget ───────────────────────────────────────────────────────────
-class FileRow(ctk.CTkFrame):
-    def __init__(self, parent, label, **kw):
-        super().__init__(parent, fg_color='transparent', **kw)
-        self.var = tk.StringVar()
-        ctk.CTkLabel(self, text=label, width=70, anchor='w',
-                     font=('Arial', 11), text_color=MUTED,
-                     fg_color='transparent').pack(side='left')
-        ctk.CTkEntry(self, textvariable=self.var, width=380, height=30,
-                     fg_color=ENTRY_BG, border_color=BORDER,
-                     text_color=WHITE, font=('Arial', 11),
-                     placeholder_text='Оберіть .xlsx файл...'
-                     ).pack(side='left', padx=(0, 6))
-        ctk.CTkButton(self, text='📂', width=44, height=30,
-                      fg_color=BTN, hover_color=BTN_HOV,
-                      text_color=WHITE, font=('Arial', 12),
-                      corner_radius=6, command=self._pick
-                      ).pack(side='left')
-
-    def _pick(self):
-        p = filedialog.askopenfilename(
-            title='Оберіть Excel файл',
-            filetypes=[('Excel', '*.xlsx *.xls'), ('Всі файли', '*.*')])
-        if p: self.var.set(p)
-
-    def get(self): return self.var.get().strip()
-
 # ── main window ───────────────────────────────────────────────────────────────
 class UPOApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title('УПО Scripts')
-        self.geometry('720x590')
+        self.geometry('720x680')
         self.resizable(False, False)
         self.configure(fg_color=BG)
         try: self.iconbitmap(ICO_PATH)
@@ -267,99 +353,123 @@ class UPOApp(ctk.CTk):
 
     def _build_bg(self):
         c = tk.Canvas(self, bg=BG, highlightthickness=0)
-        c.place(x=0, y=0, width=720, height=590)
-        # UPO emblem watermark
+        c.place(x=0, y=0, width=720, height=680)
         if os.path.exists(SVG_PATH):
             try:
-                self._emb = tksvg.SvgImage(file=SVG_PATH, scaletowidth=200)
-                c.create_image(360, 295, image=self._emb)
-                c.create_rectangle(0, 0, 720, 590, fill=BG, stipple='gray75')
+                self._emb = tksvg.SvgImage(file=SVG_PATH, scaletowidth=190)
+                c.create_image(360, 340, image=self._emb)
+                c.create_rectangle(0, 0, 720, 680, fill=BG, stipple='gray75')
             except Exception:
                 pass
-        c.create_rectangle(0, 0, 720, 3, fill=GOLD, outline='')
-        c.create_rectangle(0, 587, 720, 590, fill=BTN, outline='')
+        c.create_rectangle(0, 0, 720, 3,   fill=GOLD, outline='')
+        c.create_rectangle(0, 677, 720, 680, fill=BTN, outline='')
 
     def _build_ui(self):
-        # ── header: patrol car + title ────────────────────────────────────────
-        hdr = ctk.CTkFrame(self, fg_color='transparent', width=720, height=120)
-        hdr.place(x=0, y=8)
+        # ── header ────────────────────────────────────────────────────────────
+        hdr = ctk.CTkFrame(self, fg_color='transparent', width=720, height=118)
+        hdr.place(x=0, y=6)
         hdr.pack_propagate(False)
 
-        # patrol car image (left side)
         if os.path.exists(PNG_PATH):
             try:
                 raw = Image.open(PNG_PATH).convert('RGBA')
-                raw.thumbnail((240, 130), Image.LANCZOS)
-                self._car_img = ctk.CTkImage(light_image=raw, dark_image=raw,
-                                             size=(raw.width, raw.height))
-                ctk.CTkLabel(hdr, image=self._car_img, text='',
-                             fg_color='transparent').place(x=12, y=8)
+                raw.thumbnail((230, 110), Image.LANCZOS)
+                self._car = ctk.CTkImage(light_image=raw, dark_image=raw,
+                                         size=(raw.width, raw.height))
+                ctk.CTkLabel(hdr, image=self._car, text='',
+                             fg_color='transparent').place(x=10, y=6)
             except Exception:
                 pass
 
-        # title (right side)
         ctk.CTkLabel(hdr, text='УПО  Scripts',
                      font=('Arial', 26, 'bold'), text_color=GOLD,
-                     fg_color='transparent').place(x=270, y=18)
+                     fg_color='transparent').place(x=264, y=16)
         ctk.CTkLabel(hdr, text='Обробка файлів виїздів',
                      font=('Arial', 11), text_color=MUTED,
-                     fg_color='transparent').place(x=270, y=66)
+                     fg_color='transparent').place(x=264, y=62)
 
         # ── files card ────────────────────────────────────────────────────────
         fc = ctk.CTkFrame(self, fg_color=CARD, corner_radius=10,
                           border_width=1, border_color=BORDER,
-                          width=680, height=110)
-        fc.place(relx=0.5, y=148, anchor='n')
+                          width=686, height=108)
+        fc.place(relx=0.5, y=136, anchor='n')
         fc.pack_propagate(False)
 
-        ctk.CTkLabel(fc, text='Вхідні файли', font=('Arial', 10),
-                     text_color=MUTED, fg_color='transparent').place(x=16, y=8)
+        ctk.CTkLabel(fc, text='Вхідні файли  (☑ — обробляти)',
+                     font=('Arial', 10), text_color=MUTED,
+                     fg_color='transparent').place(x=14, y=6)
 
-        self.file1 = FileRow(fc, 'Файл 1:')
-        self.file1.place(x=14, y=32)
-        self.file2 = FileRow(fc, 'Файл 2:')
-        self.file2.place(x=14, y=68)
+        self.file1 = FileRow(fc, 'Файл 1:', on_change=self._refresh_stats)
+        self.file1.place(x=10, y=30)
+        self.file2 = FileRow(fc, 'Файл 2:', on_change=self._refresh_stats)
+        self.file2.place(x=10, y=68)
 
-        # ── settings card ─────────────────────────────────────────────────────
+        # ── stats card ────────────────────────────────────────────────────────
         sc = ctk.CTkFrame(self, fg_color=CARD, corner_radius=10,
                           border_width=1, border_color=BORDER,
-                          width=680, height=64)
-        sc.place(relx=0.5, y=270, anchor='n')
+                          width=686, height=130)
+        sc.place(relx=0.5, y=256, anchor='n')
         sc.pack_propagate(False)
 
-        ctk.CTkLabel(sc, text='Номери автомобілів', font=('Arial', 11),
-                     text_color=TEXT, fg_color='transparent').place(x=16, y=10)
-        self.lbl_cars = ctk.CTkLabel(sc, text=self._summary(),
+        ctk.CTkLabel(sc, text='Статистика тривалості прибуття',
+                     font=('Arial', 10), text_color=MUTED,
+                     fg_color='transparent').place(x=14, y=6)
+
+        self.stats_panel = StatsPanel(sc)
+        self.stats_panel.place(x=14, y=28)
+
+        # ── settings card ─────────────────────────────────────────────────────
+        nc = ctk.CTkFrame(self, fg_color=CARD, corner_radius=10,
+                          border_width=1, border_color=BORDER,
+                          width=686, height=60)
+        nc.place(relx=0.5, y=398, anchor='n')
+        nc.pack_propagate(False)
+
+        ctk.CTkLabel(nc, text='Номери автомобілів',
+                     font=('Arial', 11), text_color=TEXT,
+                     fg_color='transparent').place(x=14, y=8)
+        self.lbl_cars = ctk.CTkLabel(nc, text=self._summary(),
                                      font=('Arial', 10), text_color=MUTED,
                                      fg_color='transparent')
-        self.lbl_cars.place(x=16, y=34)
-        ctk.CTkButton(sc, text='Змінити', width=90, height=28,
+        self.lbl_cars.place(x=14, y=32)
+        ctk.CTkButton(nc, text='Змінити', width=90, height=28,
                       fg_color=BTN, hover_color=BTN_HOV,
                       text_color=WHITE, font=('Arial', 11),
                       corner_radius=6, command=self._settings
-                      ).place(x=576, y=18)
+                      ).place(x=580, y=16)
 
-        # ── colorize ──────────────────────────────────────────────────────────
+        # ── colorize + process ────────────────────────────────────────────────
         ctk.CTkCheckBox(self, text='Розукрашення рядків',
                         variable=self.colorize,
                         font=('Arial', 11), text_color=MUTED,
                         fg_color=BTN, hover_color=BTN_HOV,
                         border_color=BORDER, checkmark_color=WHITE
-                        ).place(relx=0.5, y=352, anchor='center')
+                        ).place(relx=0.5, y=480, anchor='center')
 
-        # ── process ───────────────────────────────────────────────────────────
         ctk.CTkButton(self, text='▶   Обробити',
                       font=('Arial', 14, 'bold'),
                       fg_color=BTN, hover_color=BTN_HOV,
                       text_color=WHITE, corner_radius=8,
                       height=44, width=210,
                       command=self._process
-                      ).place(relx=0.5, y=410, anchor='center')
+                      ).place(relx=0.5, y=536, anchor='center')
 
         self.lbl_status = ctk.CTkLabel(self, text='',
                                        font=('Arial', 11), text_color=MUTED,
-                                       fg_color='transparent', wraplength=640)
-        self.lbl_status.place(relx=0.5, y=470, anchor='center')
+                                       fg_color='transparent', wraplength=650)
+        self.lbl_status.place(relx=0.5, y=606, anchor='center')
+
+    # ── logic ─────────────────────────────────────────────────────────────────
+    def _refresh_stats(self):
+        paths = [f for f in [self.file1.get(), self.file2.get()] if f]
+        if not paths:
+            self.stats_panel.update(None)
+            return
+        try:
+            df = load_frames(paths)
+            self.stats_panel.update(calc_stats(df))
+        except Exception:
+            self.stats_panel.update(None)
 
     def _summary(self):
         filled = sum(1 for v in self.car_map.values() if v)
@@ -374,14 +484,17 @@ class UPOApp(ctk.CTk):
         self._st('Номери авто збережено', SUCCESS)
 
     def _process(self):
-        s1 = self.file1.get()
-        s2 = self.file2.get()
-        if not s1 or not os.path.exists(s1):
-            self._st('Оберіть хоча б перший файл', WARN)
+        paths = [f for f in [self.file1.get(), self.file2.get()] if f]
+        if not paths:
+            self._st('Оберіть та позначте хоча б один файл', WARN)
             return
         self._st('Обробка...', MUTED); self.update()
         try:
-            out, n = convert(s1, s2 or None, self.car_map, self.colorize.get())
+            df = load_frames(paths)
+            if df is None or df.empty:
+                self._st('Файли порожні або не вдалося прочитати', ERR)
+                return
+            out, n = convert(df, self.car_map, self.colorize.get(), paths[0])
             self._st(f'Готово — {n} рядків → {os.path.basename(out)}', SUCCESS)
         except Exception as e:
             self._st(f'Помилка: {e}', ERR)
