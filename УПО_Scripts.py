@@ -38,8 +38,8 @@ WARN     = '#D89A00'
 ERR      = '#C83030'
 ALT_ROW  = 'B8C8E0'
 
-# stat header colours (match screenshot)
-S_COL = ['#CC7700', '#1A55AA', '#CC5500', '#1A55AA', '#1A55AA']
+# stat card colours
+S_COL = ['#1B6B35', '#1A4F96', '#9B4000', '#8B1515', '#4A1080']
 
 ctk.set_appearance_mode('dark')
 
@@ -181,61 +181,54 @@ def convert(df, car_map, colorize=False, src_path=''):
     return out, len(df)
 
 # ── stats panel ───────────────────────────────────────────────────────────────
-STAT_LABELS = ['До 3 хв', 'Від 3.01\nдо 6 хв', 'Від 6.01\nдо 9 хв',
-               'Від 9.01\nдо 15 хв', 'Більше\n15 хв']
+STAT_LABELS = ['До 3 хв', '3.01–6 хв', '6.01–9 хв', '9.01–15 хв', 'Більше 15 хв']
 STAT_KEYS   = ['до_3', '3_6', '6_9', '9_15', '15p']
 
-class StatsPanel(tk.Frame):
+class StatsPanel(ctk.CTkFrame):
     def __init__(self, parent, **kw):
-        super().__init__(parent, bg=BG, **kw)
-        self._val_labels = []
-        self._total_lbl  = None
+        super().__init__(parent, fg_color='transparent', **kw)
+        self._nums  = []
+        self._total = None
         self._build()
 
     def _build(self):
-        COL_W = 118
+        for ci, (label, color) in enumerate(zip(STAT_LABELS, S_COL)):
+            card = ctk.CTkFrame(self, fg_color=color, corner_radius=10,
+                                width=122, height=82)
+            card.grid(row=0, column=ci, padx=4, pady=0)
+            card.pack_propagate(False)
 
-        # header row
-        for ci, (txt, col) in enumerate(zip(STAT_LABELS, S_COL)):
-            f = tk.Frame(self, bg=col, width=COL_W, height=44)
-            f.grid(row=0, column=ci, padx=1, pady=(0, 1), sticky='nsew')
-            f.pack_propagate(False)
-            tk.Label(f, text=txt, bg=col, fg=WHITE,
-                     font=('Arial', 9, 'bold'), justify='center').pack(expand=True)
+            num = ctk.CTkLabel(card, text='—',
+                               font=('Arial', 26, 'bold'),
+                               text_color=WHITE, fg_color='transparent')
+            num.pack(expand=True, pady=(10, 2))
+            self._nums.append(num)
 
-        # value row
-        for ci in range(5):
-            f = tk.Frame(self, bg=WHITE, width=COL_W, height=36)
-            f.grid(row=1, column=ci, padx=1, pady=1, sticky='nsew')
-            f.pack_propagate(False)
-            lbl = tk.Label(f, text='—', bg=WHITE, fg='#1A1A2E',
-                           font=('Arial', 14, 'bold'))
-            lbl.pack(expand=True)
-            self._val_labels.append(lbl)
+            ctk.CTkLabel(card, text=label,
+                         font=('Arial', 9), text_color='#C0D8FF',
+                         fg_color='transparent').pack(pady=(0, 10))
 
-        # total row — spans last 2 cells to match screenshot
-        f_lbl = tk.Frame(self, bg=WHITE, width=COL_W, height=28)
-        f_lbl.grid(row=2, column=3, padx=1, pady=1, sticky='nsew')
-        f_lbl.pack_propagate(False)
-        tk.Label(f_lbl, text='Всього', bg=WHITE, fg='#1A1A2E',
-                 font=('Arial', 10, 'bold')).pack(expand=True)
+        # total row
+        tot = ctk.CTkFrame(self, fg_color='transparent')
+        tot.grid(row=1, column=0, columnspan=5, sticky='e', pady=(8, 0))
 
-        f_tot = tk.Frame(self, bg=WHITE, width=COL_W, height=28)
-        f_tot.grid(row=2, column=4, padx=1, pady=1, sticky='nsew')
-        f_tot.pack_propagate(False)
-        self._total_lbl = tk.Label(f_tot, text='—', bg=WHITE, fg='#1A1A2E',
-                                    font=('Arial', 13, 'bold'))
-        self._total_lbl.pack(expand=True)
+        ctk.CTkLabel(tot, text='Всього:',
+                     font=('Arial', 12), text_color=MUTED,
+                     fg_color='transparent').pack(side='left', padx=(0, 6))
+
+        self._total = ctk.CTkLabel(tot, text='—',
+                                   font=('Arial', 18, 'bold'),
+                                   text_color=GOLD, fg_color='transparent')
+        self._total.pack(side='left')
 
     def update(self, stats):
         if stats is None:
-            for lbl in self._val_labels:
-                lbl.configure(text='—')
-            self._total_lbl.configure(text='—')
+            for n in self._nums: n.configure(text='—')
+            self._total.configure(text='—')
             return
-        for lbl, key in zip(self._val_labels, STAT_KEYS):
-            lbl.configure(text=str(stats[key]))
-        self._total_lbl.configure(text=str(stats['total']))
+        for n, key in zip(self._nums, STAT_KEYS):
+            n.configure(text=str(stats[key]))
+        self._total.configure(text=str(stats['total']))
 
 # ── file row widget ───────────────────────────────────────────────────────────
 class FileRow(ctk.CTkFrame):
@@ -407,7 +400,7 @@ class UPOApp(ctk.CTk):
         # ── stats card ────────────────────────────────────────────────────────
         sc = ctk.CTkFrame(self, fg_color=CARD, corner_radius=10,
                           border_width=1, border_color=BORDER,
-                          width=686, height=130)
+                          width=686, height=138)
         sc.place(relx=0.5, y=256, anchor='n')
         sc.pack_propagate(False)
 
@@ -416,7 +409,7 @@ class UPOApp(ctk.CTk):
                      fg_color='transparent').place(x=14, y=6)
 
         self.stats_panel = StatsPanel(sc)
-        self.stats_panel.place(x=14, y=28)
+        self.stats_panel.place(x=10, y=26)
 
         # ── settings card ─────────────────────────────────────────────────────
         nc = ctk.CTkFrame(self, fg_color=CARD, corner_radius=10,
