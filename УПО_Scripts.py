@@ -32,7 +32,7 @@ CFG_PATH   = os.path.join(_APP_DATA, 'upo_config.json')
 
 UNITS = ['НР 10', 'НР 12', 'НР 13', 'НР 15', 'НР Умань 1', 'НР Умань 2']
 
-APP_VERSION = 'v2.4'
+APP_VERSION = 'v2.5'
 GITHUB_URL  = 'https://github.com/OleksanderZabila/upo-scripts'
 
 # ── palette ───────────────────────────────────────────────────────────────────
@@ -298,7 +298,7 @@ class FileRow(ctk.CTkFrame):
                      font=('Arial', 11), text_color=MUTED,
                      fg_color='transparent').pack(side='left')
 
-        ctk.CTkEntry(self, textvariable=self.var, width=352, height=32,
+        ctk.CTkEntry(self, textvariable=self.var, width=314, height=32,
                      fg_color=ENTRY_BG, border_color=BORDER,
                      text_color=WHITE, font=('Arial', 11),
                      placeholder_text='Оберіть .xlsx файл...'
@@ -308,6 +308,12 @@ class FileRow(ctk.CTkFrame):
                       fg_color=BTN, hover_color=BTN_HOV,
                       text_color=WHITE, font=('Arial', 13),
                       corner_radius=6, command=self._pick
+                      ).pack(side='left', padx=(0, 4))
+
+        ctk.CTkButton(self, text='✕', width=32, height=32,
+                      fg_color='#7A2222', hover_color='#9A2A2A',
+                      text_color=WHITE, font=('Arial', 13, 'bold'),
+                      corner_radius=6, command=self._clear
                       ).pack(side='left')
 
         self.var.trace_add('write', lambda *_: self._changed())
@@ -318,6 +324,10 @@ class FileRow(ctk.CTkFrame):
             filetypes=[('Excel', '*.xlsx *.xls'), ('Всі файли', '*.*')])
         if p:
             self.var.set(p)
+
+    def _clear(self):
+        self.var.set('')
+        self.enabled.set(True)
 
     def _changed(self):
         if self.on_change:
@@ -514,15 +524,24 @@ class UPOApp(ctk.CTk):
                       font=('Arial', 15, 'bold'),
                       fg_color=BTN, hover_color=BTN_HOV,
                       text_color=WHITE, corner_radius=10,
-                      height=48, width=220,
+                      height=46, width=220,
                       command=self._process
-                      ).place(relx=0.5, y=558, anchor='center')
+                      ).place(relx=0.5, y=552, anchor='center')
+
+        # ── open formatted file (review) ──────────────────────────────────────
+        ctk.CTkButton(self, text='📋   Переглянути готовий файл',
+                      font=('Arial', 11),
+                      fg_color='#2A4D78', hover_color='#1F3D60',
+                      text_color=TEXT, corner_radius=8,
+                      height=32, width=220,
+                      command=self._open_output
+                      ).place(relx=0.5, y=598, anchor='center')
 
         # ── status label ──────────────────────────────────────────────────────
         self.lbl_status = ctk.CTkLabel(self, text='',
                                        font=('Arial', 11), text_color=MUTED,
                                        fg_color='transparent', wraplength=660)
-        self.lbl_status.place(relx=0.5, y=630, anchor='center')
+        self.lbl_status.place(relx=0.5, y=646, anchor='center')
 
         # ── footer ────────────────────────────────────────────────────────────
         ctk.CTkLabel(self, text=APP_VERSION,
@@ -562,6 +581,18 @@ class UPOApp(ctk.CTk):
         self.car_map = car_numbers
         self.lbl_cars.configure(text=self._summary())
         self._st('Номери авто збережено', SUCCESS)
+
+    def _open_output(self):
+        p = filedialog.askopenfilename(
+            title='Оберіть готовий xlsx для перегляду',
+            filetypes=[('Excel', '*.xlsx *.xls'), ('Всі файли', '*.*')])
+        if not p:
+            return
+        try:
+            os.startfile(p)
+            self._st(f'Відкрито: {os.path.basename(p)}', SUCCESS)
+        except Exception as e:
+            self._st(f'Не вдалося відкрити: {e}', ERR)
 
     def _process(self):
         paths = [f for f in [self.file1.get(), self.file2.get()] if f]
