@@ -70,29 +70,47 @@ def get_car(unit, car_map):
             return v
     return ''
 
-def read_df(path, sheet):
-    try:
-        return pd.read_excel(path, sheet_name=sheet, header=None)
-    except Exception:
-        return None
-
 def load_frames(paths):
     frames = []
     for p in paths:
         if not p or not os.path.exists(p):
             continue
-        for sh in [0, 1]:
-            df = read_df(p, sh)
-            if df is not None:
-                frames.append(df)
+        try:
+            xl  = pd.ExcelFile(p)
+            for sh_idx, sh_name in enumerate(xl.sheet_names[:2]):
+                try:
+                    df = xl.parse(sh_idx, header=None)
+                    df['_date'] = sh_name          # зберігаємо назву аркуша
+                    frames.append(df)
+                except Exception:
+                    pass
+        except Exception:
+            pass
     if not frames:
         return None
+
     df = pd.concat(frames, ignore_index=True)
+
+    # ── фільтр: пропускаємо рядки з порожніми критичними полями ──────────────
+    def valid(row):
+        try:
+            return (
+                hasattr(row[1], 'total_seconds') and   # час виклику
+                hasattr(row[6], 'total_seconds') and   # час відбуття
+                pd.notna(row[3]) and str(row[3]).strip() != '' and  # адреса
+                pd.notna(row[5]) and str(row[5]).strip() != ''      # наряд
+            )
+        except Exception:
+            return False
+
+    df = df[df.apply(valid, axis=1)]
     df = df.drop_duplicates(subset=[1, 2])
+
     CUT = 6 * 3600
     def sk(r):
         s = r[1].total_seconds() if hasattr(r[1], 'total_seconds') else 0
         return s + 86400 if s < CUT else s
+
     df['_s'] = df.apply(sk, axis=1)
     return df.sort_values('_s').drop(columns='_s').reset_index(drop=True)
 
@@ -127,7 +145,9 @@ def convert(df, car_map, colorize=False, src_path=''):
     except Exception:
         pass
 
-    HDR = ['ТП', 'Назва', 'Адреса', 'Час прийому виклику',
+    # 1=Дата, 2=ТП, 3=Назва, 4=Адреса, 5=Час прийому,
+    # 6=Наряд, 7=Час відбуття, 8=Тривалість, 9=Номер авто
+    HDR = ['Дата', 'ТП', 'Назва', 'Адреса', 'Час прийому виклику',
            'Наряд', 'Час відбуття', 'Тривалість (хв)', 'Номер авто НР']
 
     thin  = Side(style='thin', color='8899AA')
@@ -147,9 +167,13 @@ def convert(df, car_map, colorize=False, src_path=''):
     afil = PatternFill('solid', fgColor=ALT_ROW)
 
     for ri, (_, row) in enumerate(df.iterrows(), 2):
-        cs  = td_serial(row[1])
-        ds  = td_serial(row[6])
-        car = get_car(row[5], car_map)
+        try:
+            cs  = td_serial(row[1])
+            ds  = td_serial(row[6])
+            car = get_car(row[5], car_map)
+            date_val = str(row.get('_date', '')).strip()
+        except Exception:
+            continue                                 # пропускаємо битий рядок
 
         def wr(col, val, fmt=None, al=cen):
             c = ws.cell(ri, col, val)
@@ -157,16 +181,17 @@ def convert(df, car_map, colorize=False, src_path=''):
             if fmt: c.number_format = fmt
             if colorize and ri % 2 == 0: c.fill = afil
 
-        wr(1, cs,                   'H:MM:SS')
-        wr(2, row[2],               al=left)
-        wr(3, row[3],               al=left)
-        wr(4, cs,                   'HH:MM:SS')
-        wr(5, row[5])
-        wr(6, ds,                   'H:MM:SS')
-        wr(7, f'=MINUTE(F{ri}-D{ri})')
-        wr(8, car)
+        wr(1, date_val)                              # Дата (з назви аркуша)
+        wr(2, cs,             'H:MM:SS')             # ТП
+        wr(3, row[2],         al=left)               # Назва
+        wr(4, row[3],         al=left)               # Адреса
+        wr(5, cs,             'HH:MM:SS')            # Час прийому
+        wr(6, row[5])                                # Наряд
+        wr(7, ds,             'H:MM:SS')             # Час відбуття
+        wr(8, f'=MINUTE(G{ri}-E{ri})')              # Тривалість
+        wr(9, car)                                   # Номер авто
 
-    for i, w in enumerate([10, 30, 34, 12, 12, 10, 12, 18], 1):
+    for i, w in enumerate([12, 10, 30, 34, 12, 12, 10, 12, 18], 1):
         ws.column_dimensions[get_column_letter(i)].width = w
     ws.freeze_panes = 'A2'
 
