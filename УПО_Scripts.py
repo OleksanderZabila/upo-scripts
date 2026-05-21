@@ -2,7 +2,6 @@
 import os, sys, json, tkinter as tk, webbrowser
 from tkinter import filedialog
 import customtkinter as ctk
-import tksvg
 from PIL import Image
 import pandas as pd
 from openpyxl import Workbook
@@ -11,9 +10,20 @@ from openpyxl.utils import get_column_letter
 from datetime import datetime
 
 # ── paths ─────────────────────────────────────────────────────────────────────
+def _ascii_path(p):
+    """Windows short (8.3) path — tksvg/tk fail on non-ASCII characters."""
+    try:
+        import ctypes
+        buf = ctypes.create_unicode_buffer(512)
+        if ctypes.windll.kernel32.GetShortPathNameW(p, buf, 512) and buf.value:
+            return buf.value
+    except Exception:
+        pass
+    return p
+
 BASE_DIR   = os.path.dirname(os.path.abspath(sys.argv[0]))
 BUNDLE_DIR = getattr(sys, '_MEIPASS', BASE_DIR)
-SVG_PATH   = os.path.join(BUNDLE_DIR, 'Security_Police_of_Ukraine_emblem.svg')
+EMBLEM_PATH= os.path.join(BUNDLE_DIR, 'upo_emblem.png')
 ICO_PATH   = os.path.join(BUNDLE_DIR, 'patrol-polycar.ico')
 PNG_PATH   = os.path.join(BUNDLE_DIR, 'patrol-polycar.png')
 _APP_DATA  = os.path.join(os.environ.get('APPDATA', BASE_DIR), 'UPOTIMEDRIVER')
@@ -106,8 +116,9 @@ def load_frames(paths):
     def valid(row):
         try:
             return (
-                hasattr(row[1], 'total_seconds') and
-                hasattr(row[6], 'total_seconds') and
+                hasattr(row[1], 'total_seconds') and   # call B
+                hasattr(row[6], 'total_seconds') and   # departure G
+                hasattr(row[7], 'total_seconds') and   # arrival H
                 pd.notna(row[3]) and str(row[3]).strip() != '' and
                 pd.notna(row[5]) and str(row[5]).strip() != ''
             )
@@ -177,8 +188,9 @@ def convert(df, car_map, colorize=False, src_path=''):
 
     for ri, (_, row) in enumerate(df.iterrows(), 2):
         try:
-            cs  = td_serial(row[1])
-            ds  = td_serial(row[6])
+            cs  = td_serial(row[1])      # call reception (input B)
+            ds  = td_serial(row[6])      # departure     (input G)
+            as_ = td_serial(row[7])      # arrival       (input H)
             car = get_car(row[5], car_map)
             date_val = str(row.get('_date', '')).strip()
         except Exception:
@@ -190,14 +202,14 @@ def convert(df, car_map, colorize=False, src_path=''):
             if fmt: c.number_format = fmt
             if colorize and ri % 2 == 0: c.fill = afil
 
-        wr(1, date_val)
-        wr(2, cs,             'H:MM:SS')
-        wr(3, row[2],         al=left)
-        wr(4, row[3],         al=left)
-        wr(5, cs,             'HH:MM:SS')
-        wr(6, row[5])
-        wr(7, ds,             'H:MM:SS')
-        wr(8, f'=MINUTE(G{ri}-E{ri})')
+        wr(1, date_val)                          # Дата
+        wr(2, cs,             'H:MM:SS')         # ТП          = input B
+        wr(3, row[2],         al=left)           # Назва       = input C
+        wr(4, row[3],         al=left)           # Адреса      = input D
+        wr(5, ds,             'HH:MM:SS')        # Час прийому виклику = input G
+        wr(6, row[5])                            # Наряд       = input F
+        wr(7, as_,            'H:MM:SS')         # Час відбуття = input H
+        wr(8, f'=MINUTE(G{ri}-E{ri})')           # Тривалість = H − G
         wr(9, car)
 
     for i, w in enumerate([12, 10, 30, 34, 12, 12, 10, 12, 18], 1):
@@ -383,27 +395,12 @@ class UPOApp(ctk.CTk):
     def _build_bg(self):
         c = tk.Canvas(self, bg=BG, highlightthickness=0)
         c.place(x=0, y=0, width=W, height=H)
-        if os.path.exists(SVG_PATH):
-            try:
-                self._bg_emb = tksvg.SvgImage(file=SVG_PATH, scaletowidth=200)
-                c.create_image(W // 2, H // 2, image=self._bg_emb)
-                c.create_rectangle(0, 0, W, H, fill=BG, stipple='gray75')
-            except Exception:
-                pass
 
         # accent lines
         c.create_rectangle(0, 0, W, 3,     fill=GOLD,   outline='')
         c.create_rectangle(0, H-42, W, H-2, fill='#0E1828', outline='')
         c.create_rectangle(0, H-43, W, H-42, fill=BORDER, outline='')
         c.create_rectangle(0, H-2, W, H,    fill=BTN,    outline='')
-
-        # header emblem on right
-        if os.path.exists(SVG_PATH):
-            try:
-                self._hdr_emb = tksvg.SvgImage(file=SVG_PATH, scaletowidth=92)
-                c.create_image(W - 62, 64, image=self._hdr_emb)
-            except Exception:
-                pass
 
     # ── main UI ───────────────────────────────────────────────────────────────
     def _build_ui(self):
@@ -432,7 +429,18 @@ class UPOApp(ctk.CTk):
                      font=('Arial', 11), text_color=MUTED,
                      fg_color='transparent').place(relx=0.5, y=65, anchor='n')
 
-        # (UPO emblem rendered on background canvas in _build_bg)
+        # UPO emblem — right side of header (PNG via CTkImage)
+        if os.path.exists(EMBLEM_PATH):
+            try:
+                emb = Image.open(EMBLEM_PATH).convert('RGBA')
+                emb.thumbnail((100, 100), Image.LANCZOS)
+                self._hdr_emb = ctk.CTkImage(light_image=emb, dark_image=emb,
+                                             size=(emb.width, emb.height))
+                ctk.CTkLabel(hdr, image=self._hdr_emb, text='',
+                             fg_color='transparent'
+                             ).place(x=W - 18 - emb.width, y=10)
+            except Exception:
+                pass
 
         sep = tk.Canvas(self, bg=BORDER, highlightthickness=0, height=1)
         sep.place(x=17, y=128, width=W - 34)
