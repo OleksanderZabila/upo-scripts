@@ -30,7 +30,7 @@
 
 ### З Python
 ```bash
-pip install customtkinter tksvg openpyxl pandas Pillow
+pip install customtkinter openpyxl pandas Pillow
 python УПО_Scripts.py
 ```
 
@@ -40,7 +40,7 @@ pip install pyinstaller
 pyinstaller --onefile --windowed ^
   --name "UPOTIMEDRIVER" ^
   --icon "patrol-polycar.ico" ^
-  --add-data "Security_Police_of_Ukraine_emblem.svg;." ^
+  --add-data "upo_emblem.png;." ^
   --add-data "patrol-polycar.ico;." ^
   --add-data "patrol-polycar.png;." ^
   "УПО_Scripts.py"
@@ -67,10 +67,10 @@ pyinstaller --onefile --windowed ^
 | 2 | ТП (час прийому) | Колонка B |
 | 3 | Назва | Колонка C |
 | 4 | Адреса | Колонка D |
-| 5 | Час прийому виклику | Колонка E (формат `HH:MM:SS`) |
+| 5 | Час прийому виклику | Колонка G (формат `HH:MM:SS`) |
 | 6 | Наряд | Колонка F |
-| 7 | Час відбуття | Колонка G |
-| 8 | Тривалість (хв) | `=MINUTE(G − E)` |
+| 7 | Час відбуття | Колонка H |
+| 8 | Тривалість (хв) | `=MINUTE(G − E)` — прибуття − відбуття |
 | 9 | Номер авто НР | з конфігу за підрозділом |
 
 Файл зберігається поруч із першим вхідним: `УПО_DD.MM.YYYY.xlsx`.
@@ -83,7 +83,8 @@ pyinstaller --onefile --windowed ^
 |------|-------------|
 | `УПО_Scripts.py` | Головний GUI-застосунок |
 | `convert_1905.py` | CLI-версія конвертера (без вікна) |
-| `Security_Police_of_Ukraine_emblem.svg` | Емблема УПО (вотермарк та шапка) |
+| `upo_emblem.png` | Емблема УПО для шапки |
+| `Security_Police_of_Ukraine_emblem.svg` | Оригінал емблеми (SVG) |
 | `patrol-polycar.ico` / `.png` | Іконка / зображення для шапки |
 | `screenshot.png` | Скріншот інтерфейсу |
 
