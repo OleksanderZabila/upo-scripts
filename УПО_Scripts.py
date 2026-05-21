@@ -16,7 +16,9 @@ BUNDLE_DIR = getattr(sys, '_MEIPASS', BASE_DIR)
 SVG_PATH   = os.path.join(BUNDLE_DIR, 'Security_Police_of_Ukraine_emblem.svg')
 ICO_PATH   = os.path.join(BUNDLE_DIR, 'patrol-polycar.ico')
 PNG_PATH   = os.path.join(BUNDLE_DIR, 'patrol-polycar.png')
-CFG_PATH   = os.path.join(BASE_DIR,   'upo_config.json')
+_APP_DATA  = os.path.join(os.environ.get('APPDATA', BASE_DIR), 'УПО Scripts')
+os.makedirs(_APP_DATA, exist_ok=True)
+CFG_PATH   = os.path.join(_APP_DATA, 'upo_config.json')
 
 UNITS = ['НР 10', 'НР 12', 'НР 13', 'НР 15', 'НР Умань 1', 'НР Умань 2']
 
