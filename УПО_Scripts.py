@@ -126,15 +126,21 @@ def load_frames(paths):
             return False
 
     df = df[df.apply(valid, axis=1)]
-    df = df.drop_duplicates(subset=[1, 2])
+    df = df.drop_duplicates(subset=['_date', 1, 2])
 
-    CUT = 6 * 3600
-    def sk(r):
-        s = r[1].total_seconds() if hasattr(r[1], 'total_seconds') else 0
-        return s + 86400 if s < CUT else s
+    # sort key: (date from sheet name, time-of-day in seconds)
+    def parse_sheet_date(s):
+        s = str(s).strip()
+        for fmt in ('%d.%m.%Y', '%d.%m.%y', '%d.%m'):
+            try:
+                return datetime.strptime(s, fmt)
+            except Exception:
+                continue
+        return datetime.max  # unknown → push to end
 
-    df['_s'] = df.apply(sk, axis=1)
-    return df.sort_values('_s').drop(columns='_s').reset_index(drop=True)
+    df['_dk'] = df['_date'].apply(parse_sheet_date)
+    df['_tk'] = df[1].apply(lambda v: v.total_seconds() if hasattr(v, 'total_seconds') else 0)
+    return df.sort_values(['_dk', '_tk']).drop(columns=['_dk', '_tk']).reset_index(drop=True)
 
 # ── statistics ────────────────────────────────────────────────────────────────
 def calc_stats(df):
