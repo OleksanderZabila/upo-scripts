@@ -18,7 +18,7 @@ ICO_PATH   = os.path.join(BUNDLE_DIR, 'patrol-polycar.ico')
 PNG_PATH   = os.path.join(BUNDLE_DIR, 'patrol-polycar.png')
 CFG_PATH   = os.path.join(BASE_DIR,   'upo_config.json')
 
-UNITS = ['ТО 10', 'ТО 12', 'ТО 13', 'ТО 15', 'ТО Умань 1', 'ТО Умань 2']
+UNITS = ['НР 10', 'НР 12', 'НР 13', 'НР 15', 'НР Умань 1', 'НР Умань 2']
 
 # ── palette ───────────────────────────────────────────────────────────────────
 BG       = '#151F2E'
