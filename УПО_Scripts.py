@@ -397,6 +397,14 @@ class UPOApp(ctk.CTk):
         c.create_rectangle(0, H-43, W, H-42, fill=BORDER, outline='')
         c.create_rectangle(0, H-2, W, H,    fill=BTN,    outline='')
 
+        # header emblem on right
+        if os.path.exists(SVG_PATH):
+            try:
+                self._hdr_emb = tksvg.SvgImage(file=SVG_PATH, scaletowidth=92)
+                c.create_image(W - 62, 64, image=self._hdr_emb)
+            except Exception:
+                pass
+
     # ── main UI ───────────────────────────────────────────────────────────────
     def _build_ui(self):
         # ── header ────────────────────────────────────────────────────────────
@@ -424,15 +432,7 @@ class UPOApp(ctk.CTk):
                      font=('Arial', 11), text_color=MUTED,
                      fg_color='transparent').place(relx=0.5, y=65, anchor='n')
 
-        # UPO emblem — right
-        if os.path.exists(SVG_PATH):
-            try:
-                self._hdr_emb = tksvg.SvgImage(file=SVG_PATH, scaletowidth=88)
-                lbl = tk.Label(hdr, image=self._hdr_emb,
-                               bg=BG, bd=0, cursor='arrow')
-                lbl.place(x=W - 104, y=16)
-            except Exception:
-                pass
+        # (UPO emblem rendered on background canvas in _build_bg)
 
         sep = tk.Canvas(self, bg=BORDER, highlightthickness=0, height=1)
         sep.place(x=17, y=128, width=W - 34)
