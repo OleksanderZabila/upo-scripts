@@ -32,7 +32,7 @@ CFG_PATH   = os.path.join(_APP_DATA, 'upo_config.json')
 
 UNITS = ['НР 10', 'НР 12', 'НР 13', 'НР 15', 'НР Умань 1', 'НР Умань 2']
 
-APP_VERSION = 'v2.6'
+APP_VERSION = 'v2.7'
 GITHUB_URL  = 'https://github.com/OleksanderZabila/upo-scripts'
 
 # ── palette ───────────────────────────────────────────────────────────────────
@@ -233,7 +233,7 @@ def convert(df, car_map, colorize=False, src_path=''):
         pass
 
     HDR = ['Дата', 'ТП', 'Назва', 'Адреса', 'Час прийому виклику',
-           'Наряд', 'Час прибуття', 'Тривалість (хв)', 'Номер авто НР']
+           'Наряд', 'Час прибуття', 'Тривалість (хв)', 'Номер авто НР', 'Опис']
 
     thin = Side(style='thin', color='8899AA')
     brd  = Border(left=thin, right=thin, top=thin, bottom=thin)
@@ -279,6 +279,13 @@ def convert(df, car_map, colorize=False, src_path=''):
             if colorize and ri % 2 == 0: c.fill = afil
             return c
 
+        # опис виклику з вхідної колонки J (індекс 9), якщо є
+        try:
+            opys = row[9]
+            opys = '' if pd.isna(opys) else str(opys).strip()
+        except Exception:
+            opys = ''
+
         wr(1, date_val)                          # Дата
         wr(2, cs,             'H:MM:SS')         # ТП                  = input B
         wr(3, row[2],         al=left)           # Назва               = input C
@@ -286,15 +293,16 @@ def convert(df, car_map, colorize=False, src_path=''):
         wr(5, cs,             'HH:MM:SS')        # Час прийому виклику = input B
         wr(6, row[5])                            # Наряд               = input F
         wr(7, ds,             'H:MM:SS')         # Час прибуття        = input G
-        dur_cell = wr(8, f'=MINUTE(G{ri}-E{ri})')  # Тривалість = G − E (прибуття − прийом)
-        wr(9, car)
+        dur_cell = wr(8, f'=MINUTE(G{ri}-E{ri})')  # Тривалість = G − E
+        wr(9, car)                               # Номер авто НР
+        wr(10, opys,          al=left)           # Опис                = input J
 
         # always color duration cell by bucket (independent of row alt-colorize)
         fill = dur_bucket_fill(dur_mins)
         if fill is not None:
             dur_cell.fill = fill
 
-    for i, w in enumerate([12, 10, 30, 34, 12, 12, 10, 12, 18], 1):
+    for i, w in enumerate([12, 10, 30, 34, 12, 12, 10, 12, 18, 36], 1):
         ws.column_dimensions[get_column_letter(i)].width = w
     ws.freeze_panes = 'A2'
 
