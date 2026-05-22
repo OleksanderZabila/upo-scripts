@@ -32,7 +32,7 @@ CFG_PATH   = os.path.join(_APP_DATA, 'upo_config.json')
 
 UNITS = ['НР 10', 'НР 12', 'НР 13', 'НР 15', 'НР Умань 1', 'НР Умань 2']
 
-APP_VERSION = 'v2.7'
+APP_VERSION = 'v2.8'
 GITHUB_URL  = 'https://github.com/OleksanderZabila/upo-scripts'
 
 # ── palette ───────────────────────────────────────────────────────────────────
@@ -116,10 +116,11 @@ def load_frames(paths):
     df = pd.concat(frames, ignore_index=True)
 
     def valid(row):
+        # Лишаємо рядок навіть якщо часи биті/порожні —
+        # порожні комірки часу та порожня «Тривалість» зручніше для оператора,
+        # ніж зниклий запис. Викидаємо лише якщо немає адреси або наряду.
         try:
             return (
-                hasattr(row[1], 'total_seconds') and   # call B
-                hasattr(row[6], 'total_seconds') and   # arrival G
                 pd.notna(row[3]) and str(row[3]).strip() != '' and
                 pd.notna(row[5]) and str(row[5]).strip() != ''
             )
@@ -262,20 +263,39 @@ def convert(df, car_map, colorize=False, src_path=''):
         if mins <= 15: return dur_fills[3]
         return dur_fills[4]
 
-    for ri, (_, row) in enumerate(df.iterrows(), 2):
+    def _sanitize(v):
+        """Convert NaN/None to '' so empty cells don't show 'nan' in Excel."""
         try:
-            cs  = td_serial(row[1])      # call reception (input B)
-            ds  = td_serial(row[6])      # arrival       (input G)
-            car = get_car(row[5], car_map)
-            date_val = str(row.get('_date', '')).strip()
-            dur_mins = (row[6].total_seconds() - row[1].total_seconds()) / 60
+            if v is None or (not isinstance(v, str) and pd.isna(v)):
+                return ''
         except Exception:
-            continue
+            pass
+        return v
+
+    for ri, (_, row) in enumerate(df.iterrows(), 2):
+        # Часи можуть бути відсутні — обробляємо м'яко
+        cs = td_serial(row[1]) if hasattr(row[1], 'total_seconds') else None  # input B
+        ds = td_serial(row[6]) if hasattr(row[6], 'total_seconds') else None  # input G
+
+        try:
+            car = get_car(row[5], car_map)
+        except Exception:
+            car = ''
+        try:
+            date_val = str(row.get('_date', '')).strip()
+        except Exception:
+            date_val = ''
+
+        # Тривалість (для розфарбування) — лише якщо обидва часи валідні
+        if cs is not None and ds is not None:
+            dur_mins = (row[6].total_seconds() - row[1].total_seconds()) / 60
+        else:
+            dur_mins = None
 
         def wr(col, val, fmt=None, al=cen):
-            c = ws.cell(ri, col, val)
+            c = ws.cell(ri, col, _sanitize(val))
             c.font = rf; c.border = brd; c.alignment = al
-            if fmt: c.number_format = fmt
+            if fmt and val is not None: c.number_format = fmt
             if colorize and ri % 2 == 0: c.fill = afil
             return c
 
@@ -286,7 +306,8 @@ def convert(df, car_map, colorize=False, src_path=''):
         wr(5, cs,             'HH:MM:SS')        # Час прийому виклику = input B
         wr(6, row[5])                            # Наряд               = input F
         wr(7, ds,             'H:MM:SS')         # Час прибуття        = input G
-        dur_cell = wr(8, f'=MINUTE(G{ri}-E{ri})')  # Тривалість = G − E
+        # IFERROR — якщо E чи G пусті, повертаємо порожньо замість #VALUE!
+        dur_cell = wr(8, f'=IFERROR(MINUTE(G{ri}-E{ri}),"")')
         wr(9, car)                               # Номер авто НР
 
         # always color duration cell by bucket (independent of row alt-colorize)
