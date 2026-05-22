@@ -233,7 +233,7 @@ def convert(df, car_map, colorize=False, src_path=''):
         pass
 
     HDR = ['Дата', 'ТП', 'Назва', 'Адреса', 'Час прийому виклику',
-           'Наряд', 'Час прибуття', 'Тривалість (хв)', 'Номер авто НР', 'Опис']
+           'Наряд', 'Час прибуття', 'Тривалість (хв)', 'Номер авто НР']
 
     thin = Side(style='thin', color='8899AA')
     brd  = Border(left=thin, right=thin, top=thin, bottom=thin)
@@ -279,13 +279,6 @@ def convert(df, car_map, colorize=False, src_path=''):
             if colorize and ri % 2 == 0: c.fill = afil
             return c
 
-        # опис виклику з вхідної колонки J (індекс 9), якщо є
-        try:
-            opys = row[9]
-            opys = '' if pd.isna(opys) else str(opys).strip()
-        except Exception:
-            opys = ''
-
         wr(1, date_val)                          # Дата
         wr(2, cs,             'H:MM:SS')         # ТП                  = input B
         wr(3, row[2],         al=left)           # Назва               = input C
@@ -295,14 +288,13 @@ def convert(df, car_map, colorize=False, src_path=''):
         wr(7, ds,             'H:MM:SS')         # Час прибуття        = input G
         dur_cell = wr(8, f'=MINUTE(G{ri}-E{ri})')  # Тривалість = G − E
         wr(9, car)                               # Номер авто НР
-        wr(10, opys,          al=left)           # Опис                = input J
 
         # always color duration cell by bucket (independent of row alt-colorize)
         fill = dur_bucket_fill(dur_mins)
         if fill is not None:
             dur_cell.fill = fill
 
-    for i, w in enumerate([12, 10, 30, 34, 12, 12, 10, 12, 18, 36], 1):
+    for i, w in enumerate([12, 10, 30, 34, 12, 12, 10, 12, 18], 1):
         ws.column_dimensions[get_column_letter(i)].width = w
     ws.freeze_panes = 'A2'
 
@@ -472,7 +464,7 @@ class SettingsDialog(ctk.CTkToplevel):
         self.destroy()
 
 # ── main window ───────────────────────────────────────────────────────────────
-W, H = 720, 768
+W, H = 720, 788
 
 class UPOApp(ctk.CTk):
     def __init__(self):
@@ -548,7 +540,7 @@ class UPOApp(ctk.CTk):
         # ── files card ────────────────────────────────────────────────────────
         fc = ctk.CTkFrame(self, fg_color=CARD, corner_radius=10,
                           border_width=1, border_color=BORDER,
-                          width=686, height=160)
+                          width=686, height=180)
         fc.place(relx=0.5, y=142, anchor='n')
         fc.pack_propagate(False)
 
@@ -561,17 +553,20 @@ class UPOApp(ctk.CTk):
         self.file2 = FileRow(fc, 'Файл 2:', on_change=self._refresh_stats)
         self.file2.place(x=10, y=70)
 
-        ctk.CTkLabel(fc, text='Готовий файл — лише для перегляду статистики',
-                     font=('Arial', 9), text_color=GOLD,
-                     fg_color='transparent').place(x=14, y=112)
+        # divider + caption for the read-only "Готовий" stats picker
+        tk.Canvas(fc, bg=BORDER, highlightthickness=0, height=1
+                  ).place(x=14, y=112, width=658)
+        ctk.CTkLabel(fc, text='ⓘ  Готовий файл — лише перегляд статистики',
+                     font=('Arial', 11, 'bold'), text_color=GOLD,
+                     fg_color='transparent').place(x=14, y=118)
         self.file3 = FileRow(fc, 'Готовий:', on_change=self._refresh_stats)
-        self.file3.place(x=10, y=124)
+        self.file3.place(x=10, y=140)
 
         # ── stats card ────────────────────────────────────────────────────────
         sc = ctk.CTkFrame(self, fg_color=CARD, corner_radius=10,
                           border_width=1, border_color=BORDER,
                           width=686, height=144)
-        sc.place(relx=0.5, y=316, anchor='n')
+        sc.place(relx=0.5, y=336, anchor='n')
         sc.pack_propagate(False)
 
         ctk.CTkLabel(sc, text='Статистика тривалості прибуття',
@@ -585,7 +580,7 @@ class UPOApp(ctk.CTk):
         nc = ctk.CTkFrame(self, fg_color=CARD, corner_radius=10,
                           border_width=1, border_color=BORDER,
                           width=686, height=62)
-        nc.place(relx=0.5, y=474, anchor='n')
+        nc.place(relx=0.5, y=494, anchor='n')
         nc.pack_propagate(False)
 
         ctk.CTkLabel(nc, text='Номери автомобілів',
@@ -607,7 +602,7 @@ class UPOApp(ctk.CTk):
                         font=('Arial', 11), text_color=MUTED,
                         fg_color=BTN, hover_color=BTN_HOV,
                         border_color=BORDER, checkmark_color=WHITE
-                        ).place(relx=0.5, y=558, anchor='center')
+                        ).place(relx=0.5, y=578, anchor='center')
 
         # ── process button ────────────────────────────────────────────────────
         ctk.CTkButton(self, text='▶   Обробити',
@@ -616,7 +611,7 @@ class UPOApp(ctk.CTk):
                       text_color=WHITE, corner_radius=10,
                       height=46, width=220,
                       command=self._process
-                      ).place(relx=0.5, y=600, anchor='center')
+                      ).place(relx=0.5, y=620, anchor='center')
 
         # ── open formatted file (review) ──────────────────────────────────────
         ctk.CTkButton(self, text='📋   Переглянути готовий файл',
@@ -625,13 +620,13 @@ class UPOApp(ctk.CTk):
                       text_color=TEXT, corner_radius=8,
                       height=32, width=220,
                       command=self._open_output
-                      ).place(relx=0.5, y=646, anchor='center')
+                      ).place(relx=0.5, y=666, anchor='center')
 
         # ── status label ──────────────────────────────────────────────────────
         self.lbl_status = ctk.CTkLabel(self, text='',
                                        font=('Arial', 11), text_color=MUTED,
                                        fg_color='transparent', wraplength=660)
-        self.lbl_status.place(relx=0.5, y=694, anchor='center')
+        self.lbl_status.place(relx=0.5, y=714, anchor='center')
 
         # ── footer ────────────────────────────────────────────────────────────
         ctk.CTkLabel(self, text=APP_VERSION,
