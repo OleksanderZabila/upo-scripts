@@ -32,7 +32,7 @@ CFG_PATH   = os.path.join(_APP_DATA, 'upo_config.json')
 
 UNITS = ['НР 10', 'НР 12', 'НР 13', 'НР 15', 'НР Умань 1', 'НР Умань 2']
 
-APP_VERSION = 'v2.5'
+APP_VERSION = 'v2.6'
 GITHUB_URL  = 'https://github.com/OleksanderZabila/upo-scripts'
 
 # ── palette ───────────────────────────────────────────────────────────────────
@@ -54,6 +54,8 @@ ALT_ROW  = 'B0C4DE'
 FOOTER   = '#080F18'
 
 S_COL = ['#1A6B30', '#1A4FA0', '#9A3D00', '#8A1212', '#491080']
+# pastel duration-bucket fills (Excel cells) — same hues as S_COL, much lighter
+DUR_FILL_HEX = ['C8E6CF', 'C9D9F0', 'F5D6B0', 'F0C8C8', 'DCC4EE']
 
 ctk.set_appearance_mode('dark')
 
@@ -117,8 +119,7 @@ def load_frames(paths):
         try:
             return (
                 hasattr(row[1], 'total_seconds') and   # call B
-                hasattr(row[6], 'total_seconds') and   # departure G
-                hasattr(row[7], 'total_seconds') and   # arrival H
+                hasattr(row[6], 'total_seconds') and   # arrival G
                 pd.notna(row[3]) and str(row[3]).strip() != '' and
                 pd.notna(row[5]) and str(row[5]).strip() != ''
             )
@@ -143,6 +144,64 @@ def load_frames(paths):
     return df.sort_values(['_dk', '_tk']).drop(columns=['_dk', '_tk']).reset_index(drop=True)
 
 # ── statistics ────────────────────────────────────────────────────────────────
+def _bin_durations(durs):
+    if not durs:
+        return None
+    return {
+        'до_3':  sum(1 for x in durs if x <= 3),
+        '3_6':   sum(1 for x in durs if 3  < x <= 6),
+        '6_9':   sum(1 for x in durs if 6  < x <= 9),
+        '9_15':  sum(1 for x in durs if 9  < x <= 15),
+        '15p':   sum(1 for x in durs if x  > 15),
+        'total': len(durs),
+    }
+
+def calc_stats_from_formatted(path):
+    """Read a previously-generated output xlsx and bin its arrival durations.
+    Computes (col 7 'Час відбуття' − col 5 'Час прийому виклику') in minutes,
+    so it works even if the formula in col 8 was never evaluated by Excel."""
+    try:
+        df = pd.read_excel(path, header=0)
+    except Exception:
+        return None
+    if df is None or df.empty or df.shape[1] < 7:
+        return None
+
+    def to_sec(v):
+        if v is None:
+            return None
+        if hasattr(v, 'total_seconds'):
+            return v.total_seconds()
+        if hasattr(v, 'hour') and hasattr(v, 'minute'):  # datetime.time / Timestamp
+            return v.hour * 3600 + v.minute * 60 + getattr(v, 'second', 0)
+        if isinstance(v, (int, float)):
+            if 0 <= v < 1:                # serial fraction-of-day
+                return v * 86400
+            return v
+        try:
+            s = str(v).strip()
+            parts = s.split(':')
+            if len(parts) >= 2:
+                h = int(parts[0]); m = int(parts[1])
+                sec = int(parts[2]) if len(parts) > 2 else 0
+                return h*3600 + m*60 + sec
+        except Exception:
+            pass
+        return None
+
+    durs = []
+    e_col = df.columns[4]    # col 5 — Час прийому виклику
+    g_col = df.columns[6]    # col 7 — Час відбуття
+    for _, row in df.iterrows():
+        es = to_sec(row[e_col])
+        gs = to_sec(row[g_col])
+        if es is None or gs is None:
+            continue
+        d = (gs - es) / 60
+        if d >= 0:
+            durs.append(d)
+    return _bin_durations(durs)
+
 def calc_stats(df):
     if df is None or df.empty:
         return None
@@ -174,7 +233,7 @@ def convert(df, car_map, colorize=False, src_path=''):
         pass
 
     HDR = ['Дата', 'ТП', 'Назва', 'Адреса', 'Час прийому виклику',
-           'Наряд', 'Час відбуття', 'Тривалість (хв)', 'Номер авто НР']
+           'Наряд', 'Час прибуття', 'Тривалість (хв)', 'Номер авто НР']
 
     thin = Side(style='thin', color='8899AA')
     brd  = Border(left=thin, right=thin, top=thin, bottom=thin)
@@ -192,13 +251,24 @@ def convert(df, car_map, colorize=False, src_path=''):
     left = Alignment(horizontal='left',   vertical='center')
     afil = PatternFill('solid', fgColor=ALT_ROW)
 
+    dur_fills = [PatternFill('solid', fgColor=h) for h in DUR_FILL_HEX]
+
+    def dur_bucket_fill(mins):
+        if mins is None or mins < 0:
+            return None
+        if mins <= 3:  return dur_fills[0]
+        if mins <= 6:  return dur_fills[1]
+        if mins <= 9:  return dur_fills[2]
+        if mins <= 15: return dur_fills[3]
+        return dur_fills[4]
+
     for ri, (_, row) in enumerate(df.iterrows(), 2):
         try:
             cs  = td_serial(row[1])      # call reception (input B)
-            ds  = td_serial(row[6])      # departure     (input G)
-            as_ = td_serial(row[7])      # arrival       (input H)
+            ds  = td_serial(row[6])      # arrival       (input G)
             car = get_car(row[5], car_map)
             date_val = str(row.get('_date', '')).strip()
+            dur_mins = (row[6].total_seconds() - row[1].total_seconds()) / 60
         except Exception:
             continue
 
@@ -207,16 +277,22 @@ def convert(df, car_map, colorize=False, src_path=''):
             c.font = rf; c.border = brd; c.alignment = al
             if fmt: c.number_format = fmt
             if colorize and ri % 2 == 0: c.fill = afil
+            return c
 
         wr(1, date_val)                          # Дата
-        wr(2, cs,             'H:MM:SS')         # ТП          = input B
-        wr(3, row[2],         al=left)           # Назва       = input C
-        wr(4, row[3],         al=left)           # Адреса      = input D
-        wr(5, ds,             'HH:MM:SS')        # Час прийому виклику = input G
-        wr(6, row[5])                            # Наряд       = input F
-        wr(7, as_,            'H:MM:SS')         # Час відбуття = input H
-        wr(8, f'=MINUTE(G{ri}-E{ri})')           # Тривалість = H − G
+        wr(2, cs,             'H:MM:SS')         # ТП                  = input B
+        wr(3, row[2],         al=left)           # Назва               = input C
+        wr(4, row[3],         al=left)           # Адреса              = input D
+        wr(5, cs,             'HH:MM:SS')        # Час прийому виклику = input B
+        wr(6, row[5])                            # Наряд               = input F
+        wr(7, ds,             'H:MM:SS')         # Час прибуття        = input G
+        dur_cell = wr(8, f'=MINUTE(G{ri}-E{ri})')  # Тривалість = G − E (прибуття − прийом)
         wr(9, car)
+
+        # always color duration cell by bucket (independent of row alt-colorize)
+        fill = dur_bucket_fill(dur_mins)
+        if fill is not None:
+            dur_cell.fill = fill
 
     for i, w in enumerate([12, 10, 30, 34, 12, 12, 10, 12, 18], 1):
         ws.column_dimensions[get_column_letter(i)].width = w
@@ -388,7 +464,7 @@ class SettingsDialog(ctk.CTkToplevel):
         self.destroy()
 
 # ── main window ───────────────────────────────────────────────────────────────
-W, H = 720, 720
+W, H = 720, 768
 
 class UPOApp(ctk.CTk):
     def __init__(self):
@@ -464,7 +540,7 @@ class UPOApp(ctk.CTk):
         # ── files card ────────────────────────────────────────────────────────
         fc = ctk.CTkFrame(self, fg_color=CARD, corner_radius=10,
                           border_width=1, border_color=BORDER,
-                          width=686, height=112)
+                          width=686, height=160)
         fc.place(relx=0.5, y=142, anchor='n')
         fc.pack_propagate(False)
 
@@ -477,11 +553,17 @@ class UPOApp(ctk.CTk):
         self.file2 = FileRow(fc, 'Файл 2:', on_change=self._refresh_stats)
         self.file2.place(x=10, y=70)
 
+        ctk.CTkLabel(fc, text='Готовий файл — лише для перегляду статистики',
+                     font=('Arial', 9), text_color=GOLD,
+                     fg_color='transparent').place(x=14, y=112)
+        self.file3 = FileRow(fc, 'Готовий:', on_change=self._refresh_stats)
+        self.file3.place(x=10, y=124)
+
         # ── stats card ────────────────────────────────────────────────────────
         sc = ctk.CTkFrame(self, fg_color=CARD, corner_radius=10,
                           border_width=1, border_color=BORDER,
                           width=686, height=144)
-        sc.place(relx=0.5, y=268, anchor='n')
+        sc.place(relx=0.5, y=316, anchor='n')
         sc.pack_propagate(False)
 
         ctk.CTkLabel(sc, text='Статистика тривалості прибуття',
@@ -495,7 +577,7 @@ class UPOApp(ctk.CTk):
         nc = ctk.CTkFrame(self, fg_color=CARD, corner_radius=10,
                           border_width=1, border_color=BORDER,
                           width=686, height=62)
-        nc.place(relx=0.5, y=426, anchor='n')
+        nc.place(relx=0.5, y=474, anchor='n')
         nc.pack_propagate(False)
 
         ctk.CTkLabel(nc, text='Номери автомобілів',
@@ -517,7 +599,7 @@ class UPOApp(ctk.CTk):
                         font=('Arial', 11), text_color=MUTED,
                         fg_color=BTN, hover_color=BTN_HOV,
                         border_color=BORDER, checkmark_color=WHITE
-                        ).place(relx=0.5, y=510, anchor='center')
+                        ).place(relx=0.5, y=558, anchor='center')
 
         # ── process button ────────────────────────────────────────────────────
         ctk.CTkButton(self, text='▶   Обробити',
@@ -526,7 +608,7 @@ class UPOApp(ctk.CTk):
                       text_color=WHITE, corner_radius=10,
                       height=46, width=220,
                       command=self._process
-                      ).place(relx=0.5, y=552, anchor='center')
+                      ).place(relx=0.5, y=600, anchor='center')
 
         # ── open formatted file (review) ──────────────────────────────────────
         ctk.CTkButton(self, text='📋   Переглянути готовий файл',
@@ -535,13 +617,13 @@ class UPOApp(ctk.CTk):
                       text_color=TEXT, corner_radius=8,
                       height=32, width=220,
                       command=self._open_output
-                      ).place(relx=0.5, y=598, anchor='center')
+                      ).place(relx=0.5, y=646, anchor='center')
 
         # ── status label ──────────────────────────────────────────────────────
         self.lbl_status = ctk.CTkLabel(self, text='',
                                        font=('Arial', 11), text_color=MUTED,
                                        fg_color='transparent', wraplength=660)
-        self.lbl_status.place(relx=0.5, y=646, anchor='center')
+        self.lbl_status.place(relx=0.5, y=694, anchor='center')
 
         # ── footer ────────────────────────────────────────────────────────────
         ctk.CTkLabel(self, text=APP_VERSION,
@@ -560,6 +642,14 @@ class UPOApp(ctk.CTk):
 
     # ── logic ─────────────────────────────────────────────────────────────────
     def _refresh_stats(self):
+        # Готовий xlsx (file3) має пріоритет — показує власну статистику
+        f3 = self.file3.get()
+        if f3:
+            stats = calc_stats_from_formatted(f3)
+            if stats is not None:
+                self.stats_panel.update(stats)
+                return
+
         paths = [f for f in [self.file1.get(), self.file2.get()] if f]
         if not paths:
             self.stats_panel.update(None)
