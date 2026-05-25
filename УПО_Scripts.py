@@ -32,7 +32,7 @@ CFG_PATH   = os.path.join(_APP_DATA, 'upo_config.json')
 
 UNITS = ['НР 10', 'НР 12', 'НР 13', 'НР 15', 'НР Умань 1', 'НР Умань 2']
 
-APP_VERSION = 'v3.0'
+APP_VERSION = 'v3.1'
 GITHUB_URL  = 'https://github.com/OleksanderZabila/upo-scripts'
 
 # ── palette ───────────────────────────────────────────────────────────────────
@@ -82,8 +82,49 @@ def save_cfg(cfg):
         json.dump(cfg, f, ensure_ascii=False, indent=2)
 
 # ── helpers ───────────────────────────────────────────────────────────────────
+def to_seconds(v):
+    """Convert timedelta / datetime.time / Timestamp / 'HH:MM[:SS]' string
+    into seconds-since-midnight (float). Returns None if value can't be parsed."""
+    if v is None:
+        return None
+    if hasattr(v, 'total_seconds'):
+        return v.total_seconds()
+    if hasattr(v, 'hour') and hasattr(v, 'minute'):
+        return v.hour * 3600 + v.minute * 60 + getattr(v, 'second', 0)
+    if isinstance(v, (int, float)):
+        try:
+            import math
+            if math.isnan(v):
+                return None
+        except Exception:
+            pass
+        if 0 <= v < 1:
+            return v * 86400
+        return float(v)
+    try:
+        s = str(v).strip()
+        if not s or s.lower() == 'nan':
+            return None
+        parts = s.split(':')
+        if len(parts) >= 2:
+            h = int(parts[0]); m = int(parts[1])
+            sec = int(parts[2]) if len(parts) > 2 else 0
+            return h * 3600 + m * 60 + sec
+    except Exception:
+        pass
+    return None
+
+
 def td_serial(td):
-    return td.total_seconds() / 86400 if hasattr(td, 'total_seconds') else None
+    """Back-compat: timedelta → Excel serial fraction of day."""
+    s = to_seconds(td)
+    return s / 86400 if s is not None else None
+
+
+def _serial(v):
+    """Anything time-like → Excel serial fraction of day, or None."""
+    s = to_seconds(v)
+    return s / 86400 if s is not None else None
 
 def get_car(unit, car_map):
     s = str(unit).strip()
@@ -141,7 +182,7 @@ def load_frames(paths):
         return datetime.max  # unknown → push to end
 
     df['_dk'] = df['_date'].apply(parse_sheet_date)
-    df['_tk'] = df[1].apply(lambda v: v.total_seconds() if hasattr(v, 'total_seconds') else 0)
+    df['_tk'] = df[1].apply(lambda v: to_seconds(v) or 0)
     return df.sort_values(['_dk', '_tk']).drop(columns=['_dk', '_tk']).reset_index(drop=True)
 
 # ── statistics ────────────────────────────────────────────────────────────────
@@ -208,11 +249,13 @@ def calc_stats(df):
         return None
     durs = []
     for _, row in df.iterrows():
-        e, g = row[4], row[6]
-        if hasattr(e, 'total_seconds') and hasattr(g, 'total_seconds'):
-            d = (g.total_seconds() - e.total_seconds()) / 60
-            if d >= 0:
-                durs.append(d)
+        es = to_seconds(row[4])
+        gs = to_seconds(row[6])
+        if es is None or gs is None:
+            continue
+        d = (gs - es) / 60
+        if d >= 0:
+            durs.append(d)
     if not durs:
         return None
     return {
@@ -274,9 +317,14 @@ def convert(df, car_map, colorize=False, src_path=''):
 
     for ri, (_, row) in enumerate(df.iterrows(), 2):
         # Часи можуть бути відсутні — обробляємо м'яко
-        bs = td_serial(row[1]) if hasattr(row[1], 'total_seconds') else None  # input B (ТП)
-        es = td_serial(row[4]) if hasattr(row[4], 'total_seconds') else None  # input E (прийом виклику)
-        gs = td_serial(row[6]) if hasattr(row[6], 'total_seconds') else None  # input G (прибуття)
+        # Часи з вхідного файлу — приймаємо timedelta, datetime.time, str
+        b_sec = to_seconds(row[1])               # B — ТП
+        e_sec = to_seconds(row[4])               # E — прийом виклику
+        g_sec = to_seconds(row[6])               # G — прибуття
+
+        bs = b_sec / 86400 if b_sec is not None else None
+        es = e_sec / 86400 if e_sec is not None else None
+        gs = g_sec / 86400 if g_sec is not None else None
 
         try:
             car = get_car(row[5], car_map)
@@ -287,9 +335,9 @@ def convert(df, car_map, colorize=False, src_path=''):
         except Exception:
             date_val = ''
 
-        # Тривалість (для розфарбування) — лише якщо обидва часи валідні
-        if es is not None and gs is not None:
-            dur_mins = (row[6].total_seconds() - row[4].total_seconds()) / 60
+        # Тривалість (хв) — рахуємо в Python, не формулою
+        if e_sec is not None and g_sec is not None and g_sec >= e_sec:
+            dur_mins = int(round((g_sec - e_sec) / 60))
         else:
             dur_mins = None
 
@@ -307,8 +355,7 @@ def convert(df, car_map, colorize=False, src_path=''):
         wr(5, es,             'HH:MM:SS')        # Час прийому виклику = input E
         wr(6, row[5])                            # Наряд               = input F
         wr(7, gs,             'H:MM:SS')         # Час прибуття        = input G
-        # IFERROR — якщо E чи G пусті, повертаємо порожньо замість #VALUE!
-        dur_cell = wr(8, f'=IFERROR(MINUTE(G{ri}-E{ri}),"")')
+        dur_cell = wr(8, dur_mins if dur_mins is not None else '')
         wr(9, car)                               # Номер авто НР
 
         # always color duration cell by bucket (independent of row alt-colorize)
