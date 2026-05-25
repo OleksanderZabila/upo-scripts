@@ -32,7 +32,7 @@ CFG_PATH   = os.path.join(_APP_DATA, 'upo_config.json')
 
 UNITS = ['НР 10', 'НР 12', 'НР 13', 'НР 15', 'НР Умань 1', 'НР Умань 2']
 
-APP_VERSION = 'v2.9'
+APP_VERSION = 'v3.0'
 GITHUB_URL  = 'https://github.com/OleksanderZabila/upo-scripts'
 
 # ── palette ───────────────────────────────────────────────────────────────────
@@ -208,9 +208,9 @@ def calc_stats(df):
         return None
     durs = []
     for _, row in df.iterrows():
-        g, h = row[6], row[7]
-        if hasattr(g, 'total_seconds') and hasattr(h, 'total_seconds'):
-            d = (h.total_seconds() - g.total_seconds()) / 60
+        e, g = row[4], row[6]
+        if hasattr(e, 'total_seconds') and hasattr(g, 'total_seconds'):
+            d = (g.total_seconds() - e.total_seconds()) / 60
             if d >= 0:
                 durs.append(d)
     if not durs:
@@ -275,8 +275,8 @@ def convert(df, car_map, colorize=False, src_path=''):
     for ri, (_, row) in enumerate(df.iterrows(), 2):
         # Часи можуть бути відсутні — обробляємо м'яко
         bs = td_serial(row[1]) if hasattr(row[1], 'total_seconds') else None  # input B (ТП)
-        es = td_serial(row[6]) if hasattr(row[6], 'total_seconds') else None  # input G (прийом)
-        gs = td_serial(row[7]) if hasattr(row[7], 'total_seconds') else None  # input H (відбуття)
+        es = td_serial(row[4]) if hasattr(row[4], 'total_seconds') else None  # input E (прийом виклику)
+        gs = td_serial(row[6]) if hasattr(row[6], 'total_seconds') else None  # input G (прибуття)
 
         try:
             car = get_car(row[5], car_map)
@@ -289,7 +289,7 @@ def convert(df, car_map, colorize=False, src_path=''):
 
         # Тривалість (для розфарбування) — лише якщо обидва часи валідні
         if es is not None and gs is not None:
-            dur_mins = (row[7].total_seconds() - row[6].total_seconds()) / 60
+            dur_mins = (row[6].total_seconds() - row[4].total_seconds()) / 60
         else:
             dur_mins = None
 
@@ -304,9 +304,9 @@ def convert(df, car_map, colorize=False, src_path=''):
         wr(2, bs,             'H:MM:SS')         # ТП                  = input B
         wr(3, row[2],         al=left)           # Назва               = input C
         wr(4, row[3],         al=left)           # Адреса              = input D
-        wr(5, es,             'HH:MM:SS')        # Час прийому виклику = input G
+        wr(5, es,             'HH:MM:SS')        # Час прийому виклику = input E
         wr(6, row[5])                            # Наряд               = input F
-        wr(7, gs,             'H:MM:SS')         # Час прибуття        = input H
+        wr(7, gs,             'H:MM:SS')         # Час прибуття        = input G
         # IFERROR — якщо E чи G пусті, повертаємо порожньо замість #VALUE!
         dur_cell = wr(8, f'=IFERROR(MINUTE(G{ri}-E{ri}),"")')
         wr(9, car)                               # Номер авто НР
